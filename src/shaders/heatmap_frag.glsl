@@ -2,36 +2,50 @@
 
 in vec2 v_uv;
 
-uniform vec2 u_resolution;
-uniform vec2 u_gaze;
-uniform float u_opacity;   // 0..1 blend with scene
+uniform vec2  u_resolution;
+uniform vec2  u_gaze;
+uniform float u_opacity;
 
 out vec4 frag_color;
 
-// Same constants as foveated.frag
-const float FOVEA_RADIUS = 0.0305;
+// TODO: make these dynamic for different screen sizes
+// hardcoded for 27" 2560x1440 at 60cm viewing distance
+const float R_FOVEA = 45.0;
+const float R_10DEG = 453.0;
+const float R_20DEG = 935.0;
+const float RING_W  = 2.0;
+
+// p2 model: sigma_arcmin = 8.85 * exp(0.04 * deg) - 7.5
+float lookup_sigma(float dist_px) {
+    float deg = dist_px / 44.8; // 44.8 px = 1 degree
+    float sigma_arcmin = 8.85 * exp(0.04 * deg) - 7.5;
+    return sigma_arcmin * 0.747; // arcmin -> px
+}
+
+const float MAX_SIGMA = 9.11;  // sigma at 20deg in px — used to normalise t
 
 vec3 heatmap(float t) {
-    // 0 = deep blue (sharp), 0.5 = green, 1 = red (max blur)
-    vec3 a = mix(vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 0.0), smoothstep(0.0, 0.5, t));
-    vec3 b = mix(vec3(0.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), smoothstep(0.5, 1.0, t));
-    return t < 0.5 ? a : b;
+    if (t < 0.5)
+        return mix(vec3(0.0, 0.0, 1.0), vec3(0.0, 1.0, 0.0), t * 2.0);
+    return mix(vec3(0.0, 1.0, 0.0), vec3(1.0, 0.0, 0.0), (t - 0.5) * 2.0);
 }
 
 void main() {
-    vec2 delta = v_uv - u_gaze;
-    float aspect = u_resolution.x / u_resolution.y;
-    delta.x *= aspect;
-    float half_diag = 0.5 * sqrt(aspect * aspect + 1.0);
-    float dist = length(delta) / half_diag;
+    vec2  px      = (v_uv - u_gaze) * u_resolution;
+    float dist_px = length(px);
 
-    float outside = clamp((dist - FOVEA_RADIUS) / (1.0 - FOVEA_RADIUS + 0.001), 0.0, 1.0);
-    float blur_t = outside * outside;  // matches blur_px curve in foveated.frag
+    // t follows the actual paper blur curve, not linear distance
+    float sigma = lookup_sigma(dist_px);
+    float t     = clamp(sigma / MAX_SIGMA, 0.0, 1.0);
+    vec3  color = heatmap(t);
 
-    vec3 color = heatmap(blur_t);
+    // more transparent near centre so the scene is still readable in the fovea
+    float alpha = u_opacity * (0.2 + 0.8 * t);
 
-    // Fade opacity toward centre so scene is still readable in fovea
-    float alpha = u_opacity * (0.3 + 0.7 * blur_t);
+    // draw eccentricity rings on top — white at fovea, yellow at 10deg, orange at 20deg
+    if (abs(dist_px - R_FOVEA) < RING_W) { color = vec3(1.0);           alpha = 0.95; }
+    if (abs(dist_px - R_10DEG) < RING_W) { color = vec3(1.0, 0.9, 0.0); alpha = 0.95; }
+    if (abs(dist_px - R_20DEG) < RING_W) { color = vec3(1.0, 0.5, 0.0); alpha = 0.95; }
 
     frag_color = vec4(color, alpha);
 }

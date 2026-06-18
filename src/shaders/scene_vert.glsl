@@ -13,9 +13,11 @@ out vec3 v_normal;
 out vec3 v_frag_pos;
 
 void main() {
+
     vec4 world_pos = u_model * vec4(in_position, 1.0);
     v_frag_pos = world_pos.xyz;
     v_normal = mat3(transpose(inverse(u_model))) * in_normal;
     v_color = in_color;
+
     gl_Position = u_proj * u_view * world_pos;
 }

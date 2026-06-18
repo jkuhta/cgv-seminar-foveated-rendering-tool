@@ -11,15 +11,15 @@ uniform int u_grayscale;
 out vec4 frag_color;
 
 void main() {
-    vec3 norm = normalize(v_normal);
-    vec3 light_dir = normalize(u_light_pos - v_frag_pos);
+    vec3 N = normalize(v_normal);
+    vec3 L = normalize(u_light_pos - v_frag_pos);
 
     float ambient = 0.25;
-    float diff = max(dot(norm, light_dir), 0.0);
+    float diff = max(dot(N, L), 0.0);
 
-    vec3 view_dir = normalize(u_view_pos - v_frag_pos);
-    vec3 reflect_dir = reflect(-light_dir, norm);
-    float spec = pow(max(dot(view_dir, reflect_dir), 0.0), 32.0) * 0.4;
+    vec3 V = normalize(u_view_pos - v_frag_pos);
+    vec3 R = reflect(-L, N);
+    float spec = pow(max(dot(V, R), 0.0), 32.0) * 0.4;
 
     vec3 lit = v_color * (ambient + diff) + vec3(spec);
 

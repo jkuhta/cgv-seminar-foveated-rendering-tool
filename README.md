@@ -1,139 +1,55 @@
-# Foveated Rendering Demo
+# Educational Tool: Towards Understanding Depth Perception in Foveated Rendering
 
-An interactive educational tool built for the paper:
+**Jan Kuhta (6539653) | CGV Seminar 2026**
 
-> **Towards Understanding Depth Perception in Foveated Rendering**  
-> Kergaßner, Tariq, Didyk — SIGGRAPH 2025
+Interactive tool for exploring stereoscopic depth perception and foveated rendering, based on Kergaßner et al. (2025).
 
-The demo renders a simple 3D scene in stereo, applies foveated blur driven
-by the mouse position (simulating gaze-tracked rendering), and lets you
-interactively explore how strongly you can blur the periphery before depth
-perception breaks down. Spoiler: it takes a lot more blur than you'd expect.
-
----
-
-## What it shows
-
-Move your mouse around the scene. Blur radiates outward from wherever you're
-looking — sharp at the centre, increasingly blurry toward the edges. This is
-exactly what a VR headset does using eye tracking to save GPU time.
-
-The key finding from the paper: even at **2× the blur level** that current
-foveated rendering systems use, stereoscopic depth perception remains
-completely intact. The scene is rendered in wiggle-stereo (left/right eye
-images alternating at 3 Hz) so depth is visible without any special glasses.
-
----
+Optimised for a **27" 2560×1440 16:9 monitor at 60 cm viewing distance**. You'll need red-cyan anaglyph glasses for the
+stereo modes.
 
 ## Setup
 
+**Python 3.12** is required (3.13 has imgui compatibility issues).
+
+Create a virtual environment and install dependencies:
+
 ```bash
+python3.12 -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
-python app.py
 ```
 
-Requires Python 3.10+ and a GPU that supports OpenGL 3.3.
+## Run
 
----
-
-## Controls
-
-| Input | Action |
-|---|---|
-| Mouse move | Set gaze point — blur follows |
-| `0` | No blur |
-| `1` | Paper model (safe threshold) |
-| `2` | 2× model — still fine per the paper |
-| `3` | 3× model — now you start to notice |
-| Drag the bottom bar | Continuously adjust blur multiplier |
-| `H` | Toggle HUD |
-| `Q` / `Esc` | Quit |
-
----
-
-## Project structure
-
-```
-fov/
-├── app.py              Entry point. Window, input, main loop.
-├── config.py           All constants — window size, FOV, IPD, wiggle speed.
-├── requirements.txt
-│
-├── core/
-│   ├── renderer.py     Owns all OpenGL objects. Executes the render pipeline.
-│   └── scene.py        3D geometry: floor plane, boxes at various depths.
-│
-└── shaders/
-    ├── scene.vert      3D geometry vertex shader.
-    ├── scene.frag      Diffuse lighting + checkerboard floor.
-    ├── post.vert       Shared fullscreen triangle (used by blur + composite).
-    ├── blur.frag       Foveated Gaussian blur — sigma grows with eccentricity.
-    └── composite.frag  Wiggle stereo output + gaze marker + HUD slider.
+```bash
+python main.py
 ```
 
----
+## External Resources
 
-## Render pipeline
+**3D Scene Asset**
 
-Each frame runs five passes:
-
-```
-1. Scene → FBO (left eye,  camera offset -IPD/2)
-2. Scene → FBO (right eye, camera offset +IPD/2)
-3. H-blur → FBO  (left)     ┐  separable Gaussian,
-4. V-blur → FBO  (left)     │  sigma per pixel from
-   H-blur → FBO  (right)    │  paper Equation 6
-   V-blur → FBO  (right)    ┘
-5. Composite → screen  (wiggle + gaze dot + HUD)
-```
-
-Stereo comes naturally from rendering with two cameras separated by the IPD
-(~65 mm). No pixel-shifting tricks needed for a real 3D scene.
-
----
-
-## The blur model
-
-The blur amount at each pixel follows the paper's perceptual model
-(Equation 6, p₂ term):
+- *Low-poly desert island kit* by CGTrader
+- https://www.cgtrader.com/free-3d-models/exterior/landscape/low-poly-desert-island-kit
+- Licence: Royalty-free
+- Used as the 3D scene rendered in all modes. The island model was duplicated five times to populate the scene more
+  densely.
+- The 3D scene asset (`island.obj` + `island10.mtl`) is placed in:
 
 ```
-sigma(theta) = max(0,  8.85 * exp(0.04 * theta) - 7.5)  [arc-minutes]
+external_code/assets/island.obj
+external_code/assets/island10.mtl
 ```
 
-where `theta` is the eccentricity in degrees — how far the pixel is from the
-gaze point. This gives the blur level at which stereoacuity is *best*, i.e.
-the maximum safe blur that doesn't degrade depth perception. The slider
-multiplies this value (0× = off, 1× = model, 2× = double, 3× = triple).
+**Python Libraries** (all installed via `requirements.txt`)
 
----
+- `moderngl` — OpenGL context and rendering
+- `glfw` — window creation and input handling
+- `imgui[glfw]` — immediate-mode GUI (sidebar controls and explanation panels)
+- `numpy` — vertex data and matrix math
+- `trimesh` — OBJ/MTL loading
+- `pyrr` — camera view and projection matrices
 
-## Extending the demo
+**Paper**
 
-A few natural next steps, roughly in order of effort:
-
-- **Anaglyph mode** — one extra branch in `composite.frag`, one key binding
-  in `app.py`. Works well for grayscale content and lets an audience experience
-  stereo with cheap red-cyan glasses.
-
-- **Spatial vs stereo comparison** — split the screen: left half shows a
-  sharpness test (fine grating) degrading with blur, right half shows depth
-  remaining intact. Same blur slider drives both.
-
-- **Interactive model surface** — run `python model_explorer.py` (to be added)
-  to show the full M(θ, σ) threshold surface from the paper as a 3D Plotly
-  plot, with existing foveation methods overlaid.
-
-- **Webcam eye tracking** — replace mouse position with gaze estimated from
-  a webcam using MediaPipe Face Mesh. Swap one function in `app.py`.
-
----
-
-## Dependencies
-
-| Package | Purpose |
-|---|---|
-| `moderngl` | Python OpenGL wrapper |
-| `moderngl-window` | Window creation and input |
-| `numpy` | Matrix and vertex data |
-| `pyrr` | Camera matrices (perspective, look-at) |
+- Kergaßner et al. (2025). *Toward Understanding Depth Perception in Foveated Rendering.* ACM SIGGRAPH 2025.

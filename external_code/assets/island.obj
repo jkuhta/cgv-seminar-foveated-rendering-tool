@@ -1,6 +1,6 @@
 # Blender 5.1.1
 # www.blender.org
-mtllib island10.mtl
+mtllib island.mtl
 o Cloud.000_Icosphere.000
 v -5.637866 22.327505 -21.224274
 v -5.078114 21.429096 -20.076662

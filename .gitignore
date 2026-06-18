@@ -1,3 +1,8 @@
 .jbevel/
-.venv
+.venv/
 
+.idea/
+
+__pycache__
+
+imgui.ini

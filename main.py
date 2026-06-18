@@ -6,9 +6,9 @@ from imgui.integrations.glfw import GlfwRenderer
 
 from src.camera import Camera
 from src.renderer import Renderer
-from src.ui import UIState, draw as draw_ui
+from src.ui import UIControls, draw_ui
 
-ROTATE_SPEED   = 60.0
+ROTATE_SPEED = 60.0
 FLASH_DURATION = 2.0
 
 
@@ -32,77 +32,74 @@ def create_window():
         raise RuntimeError("Window creation failed")
 
     glfw.make_context_current(window)
-    glfw.swap_interval(1)
+    glfw.swap_interval(1)  # vsync
     return window
 
 
-def setup_opengl(window):
-    ctx = moderngl.create_context()
-    ctx.enable(moderngl.BLEND)
-    ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
-    return ctx
-
-
-def handle_keyboard(window, camera, ui_state, dt, key_state):
+def handle_keyboard(window, camera, ui_controls, dt, key_state):
     if imgui.get_io().want_capture_keyboard:
         return
 
+    # rotations (A, D)
     if glfw.get_key(window, glfw.KEY_A) == glfw.PRESS:
         camera.rotate(-ROTATE_SPEED * dt)
     if glfw.get_key(window, glfw.KEY_D) == glfw.PRESS:
         camera.rotate(+ROTATE_SPEED * dt)
 
-    # arrow keys for validation — detect single press, not hold
-    if ui_state.mode == "validation" and ui_state.trial_state == "showing":
-        left_pressed  = glfw.get_key(window, glfw.KEY_LEFT)  == glfw.PRESS
+    # validation answers (LEFT, RIGHT)
+    if ui_controls.mode == "validation" and ui_controls.trial_state == "show":
+
+        left_pressed = glfw.get_key(window, glfw.KEY_LEFT) == glfw.PRESS
         right_pressed = glfw.get_key(window, glfw.KEY_RIGHT) == glfw.PRESS
+
         if left_pressed and not key_state["left"]:
-            ui_state.answer(guessed_left=True)
+            ui_controls.answer(guessed_left=True)
         elif right_pressed and not key_state["right"]:
-            ui_state.answer(guessed_left=False)
-        key_state["left"]  = left_pressed
+            ui_controls.answer(guessed_left=False)
+        key_state["left"] = left_pressed
         key_state["right"] = right_pressed
 
 
-def update_validation_timer(ui_state, dt):
-    if ui_state.mode == "validation" and ui_state.trial_state == "flashing":
-        ui_state.flash_elapsed += dt
-        if ui_state.flash_elapsed >= FLASH_DURATION:
-            ui_state.new_trial()
+def update_validation_timer(ui_controls, dt):
+    # show black screen between trials
+    if ui_controls.mode == "validation" and ui_controls.trial_state == "reset":
+        ui_controls.flash_elapsed += dt
+        if ui_controls.flash_elapsed >= FLASH_DURATION:
+            ui_controls.new_trial()
 
 
-# TODO: could also support scroll wheel for zoom
-def update_gaze_from_mouse(ui_state, mouse_pos, drag_active, gaze_uv):
-    if (ui_state.mode == "gaze_foveated"
+def update_gaze_from_mouse(ui_controls, mouse_pos, drag_active, gaze_uv):
+    # update gaze position from mousse position
+    if (ui_controls.mode == "gaze_foveated"
             and drag_active[0]
             and not imgui.get_io().want_capture_mouse):
         gaze_uv[0] = mouse_pos[0]
         gaze_uv[1] = mouse_pos[1]
 
 
-def draw_frame(ctx, renderer, camera, ui_state, framebuffer_width, framebuffer_height, gaze_uv, imgui_impl):
-    gaze_position = (0.5, 0.5) if ui_state.mode == "foveated" else tuple(gaze_uv)
+def draw_frame(ctx, renderer, camera, ui_controls, framebuffer_width, framebuffer_height, gaze_uv, imgui_impl):
+    gaze_position = (0.5, 0.5) if ui_controls.mode == "foveated" else tuple(gaze_uv)
 
     ctx.viewport = (0, 0, framebuffer_width, framebuffer_height)
 
-    # black screen between validation trials
-    if ui_state.mode == "validation" and ui_state.trial_state == "flashing":
+    # show black screen between trials so the previous image does not bleed into the next
+    if ui_controls.mode == "validation" and ui_controls.trial_state == "reset":
         ctx.clear(0.0, 0.0, 0.0)
         ctx.screen.use()
         renderer.render_reticle(framebuffer_width, framebuffer_height, gaze_uv=(0.5, 0.5))
+    # render normal scene
     else:
-        ctx.clear(0.08, 0.08, 0.10)
         renderer.render(
             camera=camera,
-            mode=ui_state.mode,
-            ipd=ui_state.ipd,
-            blur_strength=ui_state.blur_strength,
+            mode=ui_controls.mode,
+            ipd=ui_controls.ipd,
+            blur_strength=ui_controls.blur_strength,
             viewport=(0, 0, framebuffer_width, framebuffer_height),
             gaze=gaze_position,
-            stereo_left=ui_state.stereo_left,
-            foveated_trial=ui_state.foveated_trial,
-            grayscale=ui_state.grayscale,
-            show_heatmap=ui_state.show_heatmap,
+            stereo_left=ui_controls.stereo_left,
+            foveated_trial=ui_controls.foveated_trial,
+            grayscale=ui_controls.grayscale,
+            show_heatmap=ui_controls.show_heatmap,
         )
 
     ctx.viewport = (0, 0, framebuffer_width, framebuffer_height)
@@ -112,54 +109,59 @@ def draw_frame(ctx, renderer, camera, ui_state, framebuffer_width, framebuffer_h
 
 def main():
     window = create_window()
-    ctx    = setup_opengl(window)
+    ctx = moderngl.create_context()
+    ctx.enable(moderngl.BLEND)  # needed for reticle and heatmap alpha blending
+    ctx.blend_func = moderngl.SRC_ALPHA, moderngl.ONE_MINUS_SRC_ALPHA
 
     imgui.create_context()
-    imgui_impl = GlfwRenderer(window)
+    io = imgui.get_io()
+    io.font_global_scale = 1.5
+    imgui_impl = GlfwRenderer(window)  # imgui backend that hooks into GLFW events
 
-    camera   = Camera()
-    ui_state = UIState()
+    camera = Camera()
+    ui_controls = UIControls()
+    # renderer needs framebuffer size upfront to allocate FBOs at the right resolution
     renderer = Renderer(ctx, *glfw.get_framebuffer_size(window))
 
     framebuffer_width, framebuffer_height = glfw.get_framebuffer_size(window)
-    window_width, window_height           = glfw.get_window_size(window)
+    window_width, window_height = glfw.get_window_size(window)
 
-    gaze_uv     = [0.5, 0.5]
-    mouse_pos   = [0.5, 0.5]
-    mouse_down  = [False]
-    drag_active = [False]
-    key_state   = {"left": False, "right": False}
+    gaze_uv = [0.5, 0.5]  # normalised UV, starts at screen centre
+    mouse_pos = [0.5, 0.5]  # raw mouse position, always tracked
+    mouse_down = [False]  # is left button held?
+    drag_active = [False]  # did the mouse move while held? (distinguishes click from drag)
+    key_state = {"left": False, "right": False}
 
     def on_resize(win, w, h):
         nonlocal framebuffer_width, framebuffer_height, window_width, window_height
         framebuffer_width, framebuffer_height = glfw.get_framebuffer_size(win)
-        window_width, window_height           = glfw.get_window_size(win)
+        window_width, window_height = glfw.get_window_size(win)
         renderer.resize(framebuffer_width, framebuffer_height)
 
     def on_cursor_moved(win, xpos, ypos):
         w, h = glfw.get_window_size(win)
         mouse_pos[0] = xpos / w
-        mouse_pos[1] = 1.0 - ypos / h
+        mouse_pos[1] = 1.0 - ypos / h  # flip Y: GLFW origin is top-left, UV origin is bottom-left
         if mouse_down[0]:
             drag_active[0] = True
 
     def on_mouse_button(win, button, action, mods):
         if button == glfw.MOUSE_BUTTON_LEFT:
             if action == glfw.PRESS:
-                mouse_down[0]  = True
+                mouse_down[0] = True
                 drag_active[0] = False
             else:
-                mouse_down[0]  = False
+                mouse_down[0] = False
                 drag_active[0] = False
 
         if (action == glfw.PRESS
-                and ui_state.mode == "validation"
-                and ui_state.trial_state == "showing"
+                and ui_controls.mode == "validation"
+                and ui_controls.trial_state == "show"
                 and not imgui.get_io().want_capture_mouse):
             if button == glfw.MOUSE_BUTTON_LEFT:
-                ui_state.answer(guessed_left=True)
+                ui_controls.answer(guessed_left=True)
             elif button == glfw.MOUSE_BUTTON_RIGHT:
-                ui_state.answer(guessed_left=False)
+                ui_controls.answer(guessed_left=False)
 
     glfw.set_framebuffer_size_callback(window, on_resize)
     glfw.set_cursor_pos_callback(window, on_cursor_moved)
@@ -171,19 +173,19 @@ def main():
         glfw.poll_events()
         imgui_impl.process_inputs()
 
-        now       = time.time()
-        dt        = now - last_time
+        now = time.time()
+        dt = now - last_time
         last_time = now
 
-        handle_keyboard(window, camera, ui_state, dt, key_state)
-        update_validation_timer(ui_state, dt)
+        handle_keyboard(window, camera, ui_controls, dt, key_state)
+        update_validation_timer(ui_controls, dt)
 
         imgui.new_frame()
-        draw_ui(ui_state, window_width, window_height)
+        draw_ui(ui_controls, window_width, window_height)
 
-        update_gaze_from_mouse(ui_state, mouse_pos, drag_active, gaze_uv)
-        # print(f"gaze: {gaze_uv}, mode: {ui_state.mode}")
-        draw_frame(ctx, renderer, camera, ui_state,
+        update_gaze_from_mouse(ui_controls, mouse_pos, drag_active, gaze_uv)
+        # print(f"gaze: {gaze_uv}, mode: {ui_controls.mode}")
+        draw_frame(ctx, renderer, camera, ui_controls,
                    framebuffer_width, framebuffer_height, gaze_uv, imgui_impl)
 
         glfw.swap_buffers(window)
